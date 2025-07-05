@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 # --- APP CONFIG ---
 st.set_page_config(
-    page_title="FieldForce Optimizer Pro",
+    page_title="FieldForce Intelligence - Planner",
     page_icon="🚀",
     layout="wide"
 )
