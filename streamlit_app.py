@@ -38,17 +38,26 @@ st.markdown("""
 # --- INITIALIZE SESSION STATE ---
 if 'plan' not in st.session_state:
     st.session_state.plan = {
-        "9:00 AM": {"Doctor": "Dr. Mehta", "Objective": "5 Rx Brand A", "Status": "Planned"},
-        "10:30 AM": {"Doctor": "Dr. Verma", "Objective": "New Product Sampling", "Status": "Planned"},
-        "12:00 PM": {"Doctor": "Dr. Joshi", "Objective": "3 Rx Brand B", "Status": "Planned"},
-        "2:00 PM": {"Doctor": "Sai Pharma", "Objective": "Stock Replenishment", "Status": "Planned"}
+        "9:00 AM": {"Doctor": "Dr. Mehta", "Objective": "Get 5 Rx", "Brand": "A", "Status": "Planned"},
+        "10:30 AM": {"Doctor": "Dr. Verma", "Objective": "New Product Sampling", "Brand": "B", "Status": "Planned"},
+        "12:00 PM": {"Doctor": "Dr. Joshi", "Objective": "3 Rx", "Brand": "A", "Status": "Planned"},
+        "2:00 PM": {"Doctor": "Sai Pharma", "Objective": "Stock Replenishment", "Brand": "B", "Status": "Planned"}
     }
     st.session_state.execution = {}
     st.session_state.insights = []
     st.session_state.replan = {}
     st.session_state.day_completed = False
 
-# --- SIMULATE DAY COMPLETION FUNCTION ---
+# --- HELPER FUNCTIONS ---
+def get_rx_count(objective):
+    """Safely extract Rx count from objective text"""
+    if "Rx" not in objective:
+        return 0
+    try:
+        return int(''.join(filter(str.isdigit, objective.split()[0])))
+    except:
+        return 0
+
 def simulate_day_completion():
     # Generate realistic execution data
     st.session_state.execution = {
@@ -156,7 +165,7 @@ with st.container():
     with cols[0]:
         st.metric("Total Planned Visits", len(st.session_state.plan))
     with cols[1]:
-        target_rx = sum(int(v["Objective"].split()[0]) for v in st.session_state.plan.values() if "Rx" in v["Objective"])
+        target_rx = sum(get_rx_count(v["Objective"]) for v in st.session_state.plan.values())
         st.metric("Target Rx", target_rx)
     with cols[2]:
         st.metric("Estimated Travel Time", "2.5 hours")
@@ -188,7 +197,7 @@ with st.container():
         cols = st.columns(4)
         completed = len([v for v in st.session_state.execution.values() if v["Status"] == "Success"])
         cols[0].metric("Completed", f"{completed}/{len(st.session_state.plan)}")
-        cols[1].metric("Rx Obtained", sum(int(v["Outcome"].split()[0]) for v in st.session_state.execution.values() if "Rx" in v["Outcome"]))
+        cols[1].metric("Rx Obtained", sum(get_rx_count(v["Outcome"]) for v in st.session_state.execution.values() if "Rx" in v["Outcome"]))
         cols[2].metric("Cancellations", len([v for v in st.session_state.execution.values() if v["Status"] == "Failed"]))
         cols[3].metric("Productive Time", "3.2 hours")
     else:
@@ -219,7 +228,7 @@ with st.container():
             trend_data = pd.DataFrame({
                 "Day": ["Mon", "Tue", "Wed", "Thu", "Fri"],
                 "Target Rx": [18, 22, 15, 20, target_rx],
-                "Actual Rx": [15, 20, 12, 18, sum(int(v["Outcome"].split()[0]) for v in st.session_state.execution.values() if "Rx" in v["Outcome"])]
+                "Actual Rx": [15, 20, 12, 18, sum(get_rx_count(v["Outcome"]) for v in st.session_state.execution.values() if "Rx" in v["Outcome"])]
             })
             st.line_chart(trend_data.set_index("Day"))
     else:
@@ -245,15 +254,20 @@ with st.container():
         )
         
         if st.button("✅ Approve Tomorrow's Plan", type="primary"):
+            # Convert replan to the same format as original plan
             st.session_state.plan = {
                 time: {
                     "Doctor": task["Task"],
                     "Objective": task["Reason"],
+                    "Brand": "A" if "Mehta" in task["Task"] else "B",  # Simple brand assignment logic
                     "Status": "Planned"
                 }
                 for time, task in st.session_state.replan.items()
             }
             st.session_state.day_completed = False
+            st.session_state.execution = {}
+            st.session_state.insights = []
+            st.session_state.replan = {}
             st.success("Plan approved! Ready for tomorrow.")
             st.rerun()
     else:
