@@ -1,495 +1,567 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+import random
 
-# --- APP CONFIG ---
-st.set_page_config(
-    page_title="FieldForce Intelligence - Planner",
-    page_icon="🚀",
-    layout="wide"
-)
+# --- APP CONFIGURATION ---
+st.set_page_config(layout="wide", page_title="Pharma Field Force AI Assistant", page_icon="💊")
 
 # --- CUSTOM CSS ---
 st.markdown("""
 <style>
-    .st-emotion-cache-z5fcl4 {
+    /* Main container padding */
+    .stApp > header { visibility: hidden; } /* Hide Streamlit header */
+    .stApp { margin-top: -50px; } /* Pull content up */
+    .main .block-container {
         padding-top: 2rem;
+        padding-right: 2rem;
+        padding-left: 2rem;
+        padding-bottom: 2rem;
     }
-    .st-emotion-cache-18ni7ap {
-        padding-top: 2rem;
-        padding-bottom: 0rem;
+    /* Tab styling */
+    .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
+        font-size: 1.1rem; /* Adjust tab font size */
+        font-weight: bold;
     }
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 20px; /* Space between tabs */
+    }
+    .stTabs [aria-selected="true"] {
+        border-bottom: 3px solid #1A73E8; /* Highlight active tab */
+        color: #1A73E8; /* Active tab text color */
+    }
+    /* Headers */
+    h1 { color: #1A73E8; } /* Google Blue */
+    h2, h3 { color: #3c4043; } /* Darker gray for subheadings */
+
+    /* Buttons */
+    .stButton > button {
+        color: #FFFFFF;
+        background-color: #1A73E8;
+        border-radius: 5px;
+        border: none;
+        padding: 10px 20px;
+        font-size: 16px;
+        font-weight: bold;
+        transition: background-color 0.3s ease;
+    }
+    .stButton > button:hover {
+        background-color: #0F5EBC;
+    }
+    /* Primary button (if type="primary") */
+    .stButton > button[data-testid="stFormSubmitButton"] {
+        background-color: #1A73E8;
+    }
+    .stButton > button[data-testid="stFormSubmitButton"]:hover {
+        background-color: #0F5EBC;
+    }
+
+    /* Metrics */
     .metric-card {
         border-radius: 10px;
         padding: 15px;
-        background: #f0f2f6;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        margin-bottom: 10px;
+        margin-bottom: 15px;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        background-color: #ffffff;
+        text-align: center;
     }
-    .divider-line {
-        border-top: 2px solid #6e48aa;
-        margin: 10px 0;
+    .metric-value {
+        font-size: 2.2em; /* Slightly smaller for better fit */
+        font-weight: bold;
+        color: #1A73E8;
+        margin-bottom: 5px;
     }
-    .status-success { color: #28a745; }
-    .status-warning { color: #ffc107; }
-    .status-danger { color: #dc3545; }
-    .stButton>button {
-        transition: all 0.3s ease;
+    .metric-label {
+        font-size: 0.9em; /* Slightly smaller for better fit */
+        color: #555555;
     }
-    .stButton>button:hover {
-        transform: scale(1.02);
+
+    /* Spinners and Alerts */
+    .stSpinner > div > span {
+        font-size: 1.2em;
+        color: #1A73E8;
     }
-    h1, h2, h3 {
-        color: #4a2d73;
-    }
-    /* Style for info, success, warning, error boxes */
     .stAlert {
         border-radius: 8px;
-        padding: 10px 15px;
-        margin-bottom: 10px;
     }
+
+    /* DataFrame styling for better readability */
+    .stDataFrame {
+        font-size: 0.9em;
+    }
+    
+    /* Specific status colors for text within dataframes (if applied via style.applymap) */
+    .status-success { color: #28a745; font-weight: bold; }
+    .status-warning { color: #ffc107; font-weight: bold; }
+    .status-danger { color: #dc3545; font-weight: bold; }
+
+    /* Custom insight card styles */
+    .insight-card {
+        border-left: 4px solid;
+        padding: 12px;
+        margin-bottom: 10px;
+        border-radius: 5px;
+        background-color: #f8f9fa; /* Light background for all insights */
+    }
+    .insight-success { border-color: #28a745; background-color: #e6ffe6; }
+    .insight-warning { border-color: #ffc107; background-color: #fffacd; }
+    .insight-error { border-color: #dc3545; background-color: #ffe6e6; }
+    .insight-info { border-color: #17a2b8; background-color: #e6f7ff; }
+
 </style>
 """, unsafe_allow_html=True)
 
-# --- INITIALIZE SESSION STATE ---
-def initialize_session_state():
-    # Initial plan as a DataFrame for easier manipulation with data_editor
-    st.session_state.plan = pd.DataFrame({
-        "Time Slot": ["9:00 AM", "10:30 AM", "12:00 PM", "2:00 PM"],
-        "Doctor": ["Dr. Mehta", "Dr. Verma", "Dr. Joshi", "Sai Pharma"],
-        "Objective": ["Get 5 Rx", "New Product Sampling", "3 Rx", "Stock Replenishment"],
-        "Brand": ["A", "B", "A", "B"],
-        "Planned Status": ["Planned", "Planned", "Planned", "Planned"]
-    }).set_index("Time Slot") # Using Time Slot as index for easy lookup
+# --- SESSION STATE INITIALIZATION ---
+def initialize_session_state_for_date(target_date):
+    """
+    Initializes or resets session state variables for a given target date.
+    This ensures that data is specific to the selected day.
+    """
+    st.session_state.current_date = target_date.strftime("%Y-%m-%d")
 
-    # Execution data will be built from the editable table
+    # Define a default plan. This will be the starting point for any new day.
+    default_plan = pd.DataFrame({
+        "Time Slot": ["9:00 AM", "10:30 AM", "12:00 PM", "2:00 PM", "4:00 PM"],
+        "Doctor": ["Dr. Mehta", "Dr. Verma", "Dr. Joshi", "Sai Pharma", "Dr. Kumar"],
+        "Objective": ["Target 5 Rx", "New Product Sampling", "Achieve 3 Rx", "Stock Replenishment", "Secure 4 Rx"],
+        "Brand": ["A", "B", "A", "B", "A"]
+    })
+
+    # Initialize plan (either default or from saved data if multi-day persistence was desired)
+    # For this demo, we reset to default plan if the date changes.
+    st.session_state.plan = default_plan.copy()
+    
+    # Initialize execution data (always empty at start of a new day)
     st.session_state.execution_data = pd.DataFrame(columns=[
-        "Time Slot", "Doctor", "Planned Objective", "Actual Time", "Outcome", "Notes", "Duration", "Actual Status"
+        "Time Slot", "Doctor", "Planned Objective", "Actual Time", "Outcome", 
+        "Notes", "Duration", "Actual Status", "Brand"
     ])
-    st.session_state.insights = []
-    st.session_state.replan_data = pd.DataFrame(columns=[
-        "Time Slot", "Task", "Priority", "Reason", "Brand" # Added Brand for replan
-    ])
+    
+    # Reset insights and replan
+    st.session_state.insights_text = "No insights available yet. Run today's simulation to generate."
+    st.session_state.replan_text = "No replan generated yet."
+    
+    # --- NEW: Initialize next_day_plan data frame ---
+    st.session_state.next_day_plan = pd.DataFrame(columns=["Time Slot", "Doctor", "Objective", "Brand", "Priority"])
+    
+    # --- CRITICAL: Reset day_completed for the new day ---
     st.session_state.day_completed = False
-    st.session_state.current_date = datetime.today().strftime("%Y-%m-%d") # Store current date
 
-if 'plan' not in st.session_state:
-    initialize_session_state()
+# --- Initial setup on first run or full refresh ---
+if 'current_date' not in st.session_state:
+    initialize_session_state_for_date(datetime.today())
+
+# This part handles date changes from the date_input in sidebar
+# It ensures a full reset for the *new* selected date.
+selected_date_from_input = datetime.today().date() # Default value
+# Use a unique key for the date input to ensure its value is correctly maintained
+if 'date_selector_value' in st.session_state:
+    selected_date_from_input = st.session_state.date_selector_value
+
+if st.session_state.current_date != selected_date_from_input.strftime("%Y-%m-%d"):
+    initialize_session_state_for_date(selected_date_from_input)
+
 
 # --- HELPER FUNCTIONS ---
 def get_rx_count(objective_text):
-    """Safely extract Rx count from objective text"""
-    if pd.isna(objective_text) or "Rx" not in objective_text:
+    """Safely extract Rx count from objective text using regex for better parsing."""
+    if pd.isna(objective_text):
         return 0
     try:
-        # Extract digits from the beginning of the string that might contain "Rx"
-        # e.g., "5 Rx", "get 10 Rx", "Rx for 20"
-        digits = ''.join(filter(str.isdigit, objective_text.split('Rx')[0]))
-        if digits:
-            return int(digits)
+        import re
+        match = re.search(r'(\d+)\s*Rx', str(objective_text), re.IGNORECASE)
+        if match:
+            return int(match.group(1))
         return 0
     except ValueError:
         return 0
 
 def simulate_day_completion():
-    # Create realistic execution data based on the plan
+    """Simulates a day's execution with pre-defined outcomes for demo purposes."""
     simulated_execution = []
-    for time_slot, row in st.session_state.plan.iterrows():
+    
+    doctor_outcomes = {
+        "Dr. Mehta": {"status": "Partial", "outcome": "2 Rx (Brand A)", "notes": "Price objection raised. Follow-up needed with value proposition.", "duration": "28 mins", "delay": 20},
+        "Dr. Verma": {"status": "Failed", "outcome": "Canceled - Emergency OPD", "notes": "Doctor unavailable. Needs reschedule due to high patient load.", "duration": "0 mins", "delay": 0},
+        "Dr. Joshi": {"status": "Success", "outcome": "4 Rx (Brand A)", "notes": "High potential. Will prescribe more next week. Excellent engagement.", "duration": "45 mins", "delay": 15},
+        "Sai Pharma": {"status": "Success", "outcome": "Order placed (Brand B x200 units)", "notes": "Satisfied with stock levels. Discussed promotional offers.", "duration": "35 mins", "delay": 30},
+        "Dr. Kumar": {"status": "Success", "outcome": "3 Rx (Brand A)", "notes": "Good discussion on patient benefits. Receptive to new data.", "duration": "30 mins", "delay": 10},
+        "New Doctor": {"status": "Success", "outcome": "Introductory Visit", "notes": "Positive first interaction. Follow-up next week.", "duration": "25 mins", "delay": 5}, # Added for custom plan
+        "default": {"status": "Success", "outcome": "Visit completed", "notes": "Routine check completed satisfactorily.", "duration": "20 mins", "delay": 10}
+    }
+
+    # Ensure st.session_state.plan is not empty before simulating
+    if st.session_state.plan.empty:
+        st.warning("No plan available for simulation. Please add some visits to the plan first.")
+        return
+
+    for _, row in st.session_state.plan.iterrows():
+        time_slot = row["Time Slot"]
         doctor = row["Doctor"]
         objective = row["Objective"]
         brand = row["Brand"]
-
-        actual_time = ""
-        outcome = ""
-        notes = ""
-        duration = ""
-        status = ""
-
-        if doctor == "Dr. Mehta":
-            actual_time = (datetime.strptime(time_slot, "%I:%M %p") + timedelta(minutes=20)).strftime("%I:%M %p")
-            outcome = "2 Rx (Brand A)"
-            notes = "Price objection raised."
-            duration = "28 mins"
-            status = "Partial"
-        elif doctor == "Dr. Verma":
-            actual_time = time_slot # Same planned time, but outcome different
-            outcome = "Canceled"
-            notes = "Emergency OPD. Needs reschedule."
-            duration = "0 mins"
-            status = "Failed"
-        elif doctor == "Dr. Joshi":
-            actual_time = (datetime.strptime(time_slot, "%I:%M %p") + timedelta(minutes=15)).strftime("%I:%M %p")
-            outcome = "4 Rx (Brand A)" # Slightly better outcome
-            notes = "Will prescribe more next week. High potential."
-            duration = "45 mins"
-            status = "Success"
-        elif doctor == "Sai Pharma":
-            actual_time = (datetime.strptime(time_slot, "%I:%M %p") + timedelta(minutes=30)).strftime("%I:%M %p")
-            outcome = "Order placed (Brand B x200 units)"
-            notes = "Satisfied with stock levels."
-            duration = "35 mins"
-            status = "Success"
-        else: # For any extra tasks if added manually before simulation
-            actual_time = (datetime.strptime(time_slot, "%I:%M %p") + timedelta(minutes=10)).strftime("%I:%M %p")
-            outcome = "Visit completed"
-            notes = "Routine check."
-            duration = "20 mins"
-            status = "Success"
+        
+        outcome_details = doctor_outcomes.get(doctor, doctor_outcomes["default"])
+        
+        try:
+            planned_time_dt = datetime.strptime(time_slot, "%I:%M %p")
+            actual_time = (planned_time_dt + timedelta(minutes=outcome_details["delay"])).strftime("%I:%M %p")
+        except ValueError:
+            # Fallback if time_slot is not in expected format
+            actual_time = "N/A" 
 
         simulated_execution.append({
             "Time Slot": time_slot,
             "Doctor": doctor,
             "Planned Objective": objective,
             "Actual Time": actual_time,
-            "Outcome": outcome,
-            "Notes": notes,
-            "Duration": duration,
-            "Actual Status": status
+            "Outcome": outcome_details["outcome"],
+            "Notes": outcome_details["notes"],
+            "Duration": outcome_details["duration"],
+            "Actual Status": outcome_details["status"],
+            "Brand": brand
         })
     st.session_state.execution_data = pd.DataFrame(simulated_execution)
 
-    # Generate insights
-    st.session_state.insights = [
-        {"type": "error", "text": "🚨 Price objections for Brand A increased 20% this week."},
-        {"type": "warning", "text": "⚠️ Dr. Verma has canceled 3 visits this month. Requires a different approach."},
-        {"type": "success", "text": "✅ Dr. Joshi shows high Rx potential (actual 4Rx vs 3Rx planned). Follow-up recommended."},
-        {"type": "info", "text": "ℹ️ Chemist visits before 11 AM have 30% higher success rate."}
-    ]
-
-    # Generate replan for tomorrow based on today's outcome
-    # Replan as a DataFrame for data_editor
-    replan_tasks = []
-    # Carry over Dr. Verma
-    replan_tasks.append({
-        "Time Slot": "9:30 AM", # Suggested new time
-        "Task": "Dr. Verma",
-        "Priority": "Critical",
-        "Reason": "Reschedule attempt after cancellation",
-        "Brand": "B"
-    })
-    # Follow-up with Dr. Mehta for price objection
-    replan_tasks.append({
-        "Time Slot": "11:00 AM",
-        "Task": "Dr. Mehta",
-        "Priority": "High",
-        "Reason": "Address price objection, reinforce Brand A value",
-        "Brand": "A"
-    })
-    # High potential Dr. Joshi
-    replan_tasks.append({
-        "Time Slot": "2:00 PM",
-        "Task": "Dr. Joshi",
-        "Priority": "High",
-        "Reason": "Rx reinforcement for Brand A",
-        "Brand": "A"
-    })
-    # Add a new proactive visit
-    replan_tasks.append({
-        "Time Slot": "4:00 PM",
-        "Task": "New Prospect Clinic",
-        "Priority": "Medium",
-        "Reason": "Introduce Brand B to new clinic",
-        "Brand": "B"
-    })
-
-    st.session_state.replan_data = pd.DataFrame(replan_tasks)
+    # --- CRITICAL: Generate insights and replan *after* execution data is populated ---
+    generate_intelligent_insights()
+    generate_intelligent_replan()
+    
+    # --- CRITICAL: Set day_completed to True once simulation is complete ---
     st.session_state.day_completed = True
-    st.rerun()
+
+def generate_intelligent_insights():
+    """Generates AI-like insights based on simulated execution data."""
+    execution_df = st.session_state.execution_data
+    if execution_df.empty:
+        st.session_state.insights_text = "No execution data to generate insights. Run the simulation first."
+        return
+
+    total_visits = execution_df.shape[0]
+    if total_visits == 0: # Handle case if execution_data somehow becomes empty despite checks
+        st.session_state.insights_text = "No visits executed to generate insights."
+        return
+
+    success_visits = execution_df[execution_df["Actual Status"] == "Success"].shape[0]
+    partial_visits = execution_df[execution_df["Actual Status"] == "Partial"].shape[0]
+    failed_visits = execution_df[execution_df["Actual Status"] == "Failed"].shape[0]
+
+    rx_obtained = sum(get_rx_count(outcome) for outcome in execution_df["Outcome"])
+    
+    brand_performance = execution_df.groupby("Brand")["Actual Status"].apply(
+        lambda x: (x == "Success").sum() / len(x) if len(x) > 0 else 0
+    ).reset_index()
+    brand_performance.columns = ["Brand", "Success Rate"]
+    brand_performance_str = "\n".join([f"- **{row['Brand']}**: {row['Success Rate']:.1%} success rate" for index, row in brand_performance.iterrows()])
+
+    # Aggregate notes to avoid duplicates and ensure readability
+    all_notes = execution_df["Notes"].dropna().unique()
+    notes_summary = "\n".join([f"- {note}" for note in all_notes])
+
+    insights_text = f"""
+### Daily Performance Summary for {st.session_state.current_date}:
+
+* **Total Visits Planned:** {st.session_state.plan.shape[0]}
+* **Total Visits Executed:** {total_visits}
+* **Success Rate:** {success_visits / total_visits:.1%} ({success_visits} successful visits)
+* **Partial Success:** {partial_visits} visits
+* **Failed Visits:** {failed_visits} visits
+* **Total Rx Obtained (Estimated):** {rx_obtained} units across all brands
+
+#### Brand Performance Overview:
+{brand_performance_str if brand_performance_str else "- No specific brand performance data."}
+
+#### Key Takeaways from Doctor Interactions:
+{notes_summary if notes_summary else "- No specific notes recorded."}
+
+#### Recommendations:
+* **Focus on Dr. Verma:** High priority to reschedule due to emergency OPD. Understand their availability better for future planning.
+* **Address Price Objections:** For accounts like Dr. Mehta, prepare stronger value propositions or discuss flexible pricing models for Brand A.
+* **Leverage Successes:** Identify common factors in successful visits (e.g., Dr. Joshi, Dr. Kumar) and replicate strategies.
+* **Proactive Stock Management:** Continue strong engagement with pharmacies like Sai Pharma for Brand B.
+"""
+    st.session_state.insights_text = insights_text
+
+def generate_intelligent_replan():
+    """
+    Generates a simple AI-like replan summary and a structured DataFrame
+    for the next day's plan based on insights.
+    """
+    if st.session_state.execution_data.empty:
+        st.session_state.replan_text = "Cannot generate replan without simulation data."
+        st.session_state.next_day_plan = pd.DataFrame(columns=["Time Slot", "Doctor", "Objective", "Brand", "Priority"])
+        return
+
+    # --- Replan Text Summary (as before) ---
+    replan_summary = """
+### Replan Suggestions for Tomorrow:
+
+Based on today's performance and insights, here are some high-priority suggestions for your next day's plan:
+
+1.  **Reschedule Dr. Verma:** This is critical. Prioritize rescheduling for early morning or late afternoon to avoid peak OPD hours. Objective: Ensure successful product detailing.
+2.  **Follow-up with Dr. Mehta:** Address the price objection. Prepare specific data on ROI for Brand A or discuss alternative solutions. Objective: Convert partial success to full Rx.
+3.  **Reinforce Success with Dr. Joshi & Dr. Kumar:** Maintain strong relationships and potentially increase frequency of visits or introduce new product lines. Objective: Deepen engagement and increase Rx volume.
+4.  **Strategic Pharmacy Visit (Sai Pharma):** Build on the successful order for Brand B. Discuss potential for Brand A or new products.
+5.  **Target New Leads (if available):** Allocate 1-2 slots for cold calls or introductory visits to expand reach, especially in areas with lower current success rates.
+
+**Considerations for Time Slots:**
+* Avoid peak clinic hours for critical doctor visits identified as 'Failed' or 'Partial'.
+* Group geographically close visits to optimize travel time.
+
+This replan focuses on addressing today's challenges and capitalizing on successes to improve overall territory performance.
+"""
+    st.session_state.replan_text = replan_summary
+
+    # --- NEW: Generate structured data for next day's plan ---
+    next_day_visits = []
+    
+    # Priority 1: Reschedule failed visits
+    failed_visits_today = st.session_state.execution_data[st.session_state.execution_data["Actual Status"] == "Failed"]
+    for _, row in failed_visits_today.iterrows():
+        next_day_visits.append({
+            "Time Slot": "09:30 AM", # Suggest an early slot
+            "Doctor": row["Doctor"],
+            "Objective": f"Reschedule: {row['Planned Objective']}",
+            "Brand": row["Brand"],
+            "Priority": "High (Failed Today)"
+        })
+    
+    # Priority 2: Follow-up on partial success
+    partial_visits_today = st.session_state.execution_data[st.session_state.execution_data["Actual Status"] == "Partial"]
+    for _, row in partial_visits_today.iterrows():
+        next_day_visits.append({
+            "Time Slot": "11:00 AM", # Suggest a mid-morning slot
+            "Doctor": row["Doctor"],
+            "Objective": f"Follow-up: {row['Planned Objective']}",
+            "Brand": row["Brand"],
+            "Priority": "High (Partial Today)"
+        })
+
+    # Priority 3: Maintain success & explore further
+    success_visits_today = st.session_state.execution_data[st.session_state.execution_data["Actual Status"] == "Success"]
+    # Exclude those already marked for high priority follow-up
+    success_for_next_day = success_visits_today[
+        ~success_visits_today['Doctor'].isin(failed_visits_today['Doctor']) &
+        ~success_visits_today['Doctor'].isin(partial_visits_today['Doctor'])
+    ]
+    for _, row in success_for_next_day.sample(min(2, len(success_for_next_day))).iterrows(): # Take up to 2 successful ones
+        next_day_visits.append({
+            "Time Slot": "01:30 PM", # Suggest afternoon slot
+            "Doctor": row["Doctor"],
+            "Objective": f"Reinforce: {row['Planned Objective']}",
+            "Brand": row["Brand"],
+            "Priority": "Medium (Successful Today)"
+        })
+
+    # Add a generic new lead if few visits generated
+    if len(next_day_visits) < 5:
+        next_day_visits.append({
+            "Time Slot": "03:00 PM",
+            "Doctor": "New Lead Clinic",
+            "Objective": "New Introduction",
+            "Brand": "Any",
+            "Priority": "Low (New Potential)"
+        })
+
+    # Convert to DataFrame
+    st.session_state.next_day_plan = pd.DataFrame(next_day_visits)
+    
+    # Optional: Sort the plan by Time Slot or Priority
+    st.session_state.next_day_plan["Time Sort"] = st.session_state.next_day_plan["Time Slot"].apply(
+        lambda x: datetime.strptime(x, "%I:%M %p").time()
+    )
+    st.session_state.next_day_plan = st.session_state.next_day_plan.sort_values(
+        by=["Priority", "Time Sort"], 
+        ascending=[True, True] # High priority first, then by time
+    ).drop(columns=["Time Sort"])
+    
+
+# --- MAIN DASHBOARD ---
+st.title("💊 Pharma Field Force AI Assistant")
+
+st.markdown("""
+Welcome to your AI-powered field force assistant!
+**Plan** your daily visits, **simulate** execution, and get **intelligent insights** and **replans** to optimize your performance.
+""")
+
+st.markdown(f"--- **Medical Rep: MR Ravi** • **Territory: North 2** • **Date: {st.session_state.current_date}** ---")
+
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Simulation Controls")
-    rep_name = st.selectbox("Medical Rep", ["MR Ravi", "MR Priya", "MR Ajay"])
-    territory = st.selectbox("Territory", ["North 2", "West 1", "South 3"])
     
-    # Using session state to control the displayed date
-    display_date = st.date_input("Current Simulation Date", datetime.today())
-    # Update current_date in session state only when changed by user
-    if display_date.strftime("%Y-%m-%d") != st.session_state.current_date:
-        st.session_state.current_date = display_date.strftime("%Y-%m-%d")
-        # If date changes, reset simulation for a new day unless explicitly prevented
-        # For this simple demo, we'll reset if date changes
-        initialize_session_state() # Resets everything for the new selected day
-        st.rerun()
-
-    st.divider()
-
-    if not st.session_state.day_completed:
-        if st.button("🔄 Simulate Day Completion", use_container_width=True, help="Automatically fill execution and generate insights/replan."):
-            simulate_day_completion()
-    else:
-        if st.button("🔄 Reset Simulation for New Day", use_container_width=True, help="Clear all executed data and insights. Start fresh."):
-            initialize_session_state()
-            st.rerun()
-
-    st.divider()
-    if not st.session_state.execution_data.empty:
-        st.download_button(
-            "📥 Export Today's Report",
-            data=st.session_state.execution_data.to_csv(index=False).encode('utf-8'),
-            file_name=f"sfe_report_{st.session_state.current_date}_{rep_name}.csv",
-            mime="text/csv"
-        )
-    else:
-        st.info("No execution data to export yet.")
-
-# --- MAIN DASHBOARD ---
-st.title("FieldForce Intelligence - Planner")
-st.caption(f"Plan → Execute → Learn → Replan for {rep_name} in {territory} - {st.session_state.current_date}")
-
-# SECTION 1: TODAY'S PLAN
-with st.container():
-    st.header("📅 Today's Original Plan")
-    st.dataframe(
-        st.session_state.plan,
-        use_container_width=True,
-        height=250,
-        column_config={
-            "Planned Status": st.column_config.SelectboxColumn(
-                "Planned Status",
-                options=["Planned", "In Progress", "Completed", "Canceled"],
-                disabled=True # Original plan is not editable here
-            )
-        }
+    # Date Input
+    selected_date_input = st.date_input(
+        "📅 Select Simulation Date", 
+        value=datetime.strptime(st.session_state.current_date, "%Y-%m-%d").date(),
+        key="date_selector" # Add a key to prevent potential issues with state
     )
+    # Store the value explicitly
+    st.session_state.date_selector_value = selected_date_input
 
-    # Plan metrics
-    cols = st.columns(3)
-    with cols[0]:
-        st.metric("Total Planned Visits", len(st.session_state.plan))
-    with cols[1]:
-        target_rx = sum(get_rx_count(obj) for obj in st.session_state.plan["Objective"].values)
-        st.metric("Target Rx (Planned)", target_rx)
-    with cols[2]:
-        st.metric("Estimated Travel Time", "2.5 hours")
 
-# SECTION 2: EXECUTION TRACKING
-st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
-with st.container():
-    st.header("📝 Today's Execution Reality")
+    # --- CRITICAL: Update current_date and re-initialize if the date changes ---
+    if selected_date_input.strftime("%Y-%m-%d") != st.session_state.current_date:
+        initialize_session_state_for_date(selected_date_input)
+        st.rerun() # Trigger rerun immediately after state update
 
-    if st.session_state.day_completed:
-        st.subheader("Finalized Execution Data")
-        # Display execution data as a non-editable table after simulation or manual save
-        def color_status(val):
-            if val == "Success": return "color: #28a745; font-weight: bold;"
-            elif val == "Partial": return "color: #ffc107; font-weight: bold;"
-            else: return "color: #dc3545; font-weight: bold;"
+    st.divider()
 
-        st.dataframe(
-            st.session_state.execution_data.style.applymap(color_status, subset=["Actual Status"]),
-            use_container_width=True,
-            height=300
-        )
-
-        # Execution metrics (calculated from final data)
-        cols = st.columns(4)
-        completed_visits = len(st.session_state.execution_data[st.session_state.execution_data["Actual Status"] == "Success"])
-        cols[0].metric("Successfully Completed", f"{completed_visits}/{len(st.session_state.plan)}")
-
-        actual_rx_obtained = sum(get_rx_count(outcome) for outcome in st.session_state.execution_data["Outcome"].values)
-        cols[1].metric("Actual Rx Obtained", actual_rx_obtained)
-
-        cancellations = len(st.session_state.execution_data[st.session_state.execution_data["Actual Status"] == "Failed"])
-        cols[2].metric("Cancellations/Failures", cancellations)
-        cols[3].metric("Productive Time", "3.2 hours") # Placeholder for now
-
+    # --- SIMULATION BUTTON LOGIC ---
+    if not st.session_state.day_completed:
+        # Show "Run Simulation" if day is not completed
+        if st.button("🚀 Run Today's Simulation", use_container_width=True, type="primary", 
+                     help="Automatically fills execution outcomes and generates AI insights/replan."):
+            with st.spinner("Simulating today's field operations..."):
+                simulate_day_completion()
+            st.toast("Simulation complete! Check Execution & Analytics tabs.", icon="✅")
+            st.rerun() # --- CRITICAL: Rerun AFTER state is updated ---
     else:
-        st.info("Fill out the execution details below or 'Simulate Day Completion' from sidebar.")
+        # Show "Day Completed" message and "Start New Day" button if day is completed
+        st.success("🎉 Today's execution simulated!")
+        if st.button("🔄 Start New Day", use_container_width=True):
+            # Increment date for the new day and re-initialize
+            next_day = datetime.strptime(st.session_state.current_date, "%Y-%m-%d") + timedelta(days=1)
+            initialize_session_state_for_date(next_day)
+            st.toast(f"Ready for {st.session_state.current_date}!", icon="🗓️")
+            st.rerun() # Trigger rerun to show the new day's empty plan
 
-        # Prepare a DataFrame for live editing based on the current plan
-        # Add columns for actual data, preserving planned data
-        editable_execution_df = st.session_state.plan.copy().reset_index() # Convert index to column for data_editor
-        editable_execution_df = editable_execution_df.rename(columns={
-            "Objective": "Planned Objective",
-            "Planned Status": "Initial Status"
-        })
-        editable_execution_df['Actual Time'] = ""
-        editable_execution_df['Outcome'] = ""
-        editable_execution_df['Notes'] = ""
-        editable_execution_df['Duration'] = ""
-        editable_execution_df['Actual Status'] = "Not Visited" # Default status
+    st.divider()
 
-        st.subheader("Live Execution Updates (Edit Below)")
-        edited_live_execution_df = st.data_editor(
-            editable_execution_df,
-            column_config={
-                "Time Slot": st.column_config.TextColumn("Time Slot", disabled=True),
-                "Doctor": st.column_config.TextColumn("Doctor", disabled=True),
-                "Planned Objective": st.column_config.TextColumn("Planned Objective", disabled=True),
-                "Brand": st.column_config.TextColumn("Brand", disabled=True),
-                "Initial Status": st.column_config.TextColumn("Initial Status", disabled=True),
-                "Actual Status": st.column_config.SelectboxColumn(
-                    "Actual Status",
-                    options=["Not Visited", "In Progress", "Success", "Partial", "Failed"],
-                    required=True
-                ),
-                "Actual Time": st.column_config.TextColumn("Actual Time (e.g., 9:15 AM)"),
-                "Outcome": st.column_config.TextColumn("Outcome (e.g., 5 Rx, Canceled, Order Placed)"),
-                "Notes": st.column_config.TextColumn("Notes"),
-                "Duration": st.column_config.TextColumn("Duration (e.g., 30 mins)"),
-            },
-            num_rows="dynamic", # Allow adding/deleting rows if needed for ad-hoc visits
-            use_container_width=True,
-            key="live_execution_editor"
-        )
+    st.info("💡 **Tip:** Add visits to your plan on the 'Daily Plan' tab before running the simulation!")
+    st.info("📊 **Demo Data:** This app uses pre-defined demo data for simulation. In a real scenario, this would integrate with actual CRM data.")
 
-        if st.button("💾 Save Live Execution Updates"):
-            # Update st.session_state.execution_data from the edited_live_execution_df
-            st.session_state.execution_data = edited_live_execution_df.copy()
-            st.session_state.day_completed = True # Mark day as completed upon manual save
-            st.success("Live execution updates saved! Day marked as completed.")
+
+# --- MAIN TABS ---
+# --- MODIFIED: Added tab5 ---
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["🗓️ Daily Plan", "📊 Execution Data", "📈 Analytics & Insights", "🧠 AI Replan", "🗓️ Next Day's Plan"])
+
+with tab1:
+    st.header(f"Daily Visit Plan for {st.session_state.current_date}")
+    st.write("Plan your visits for the day. Add doctors, objectives, and brands.")
+
+    # Input form for adding plan entries
+    with st.form("add_plan_form", clear_on_submit=True):
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            time_slot = st.text_input("Time Slot (e.g., 10:00 AM)", value="09:00 AM")
+        with col2:
+            doctor = st.text_input("Doctor/Pharmacy Name", value="New Doctor")
+        with col3:
+            objective = st.text_input("Objective (e.g., 5 Rx Brand A)", value="Introduce New Drug")
+        with col4:
+            brand = st.text_input("Brand", value="Brand C")
+        
+        add_button = st.form_submit_button("➕ Add to Plan")
+
+        if add_button:
+            if time_slot and doctor and objective and brand:
+                new_row = pd.DataFrame([{
+                    "Time Slot": time_slot,
+                    "Doctor": doctor,
+                    "Objective": objective,
+                    "Brand": brand
+                }])
+                st.session_state.plan = pd.concat([st.session_state.plan, new_row], ignore_index=True)
+                st.toast("Visit added to plan!", icon="✅")
+                st.rerun() # Rerun to update the displayed table
+            else:
+                st.warning("Please fill all fields to add to the plan.")
+
+    # Display and clear plan
+    if not st.session_state.plan.empty:
+        st.subheader("Current Daily Plan:")
+        st.dataframe(st.session_state.plan, use_container_width=True, hide_index=True)
+        
+        if st.button("🗑️ Clear Plan", type="secondary"):
+            st.session_state.plan = pd.DataFrame(columns=["Time Slot", "Doctor", "Objective", "Brand"])
+            st.toast("Plan cleared!", icon="🧹")
             st.rerun()
+    else:
+        st.info("Your daily plan is empty. Use the form above to add visits, or a default plan will be used for simulation.")
 
-# SECTION 3: EOD GOAL ASSESSMENT
-st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
-with st.container():
-    st.header("🎯 EOD Goal Assessment & Variance")
+with tab2:
+    st.header(f"Execution Data for {st.session_state.current_date}")
+    st.write("This section shows the simulated outcomes of your daily visits.")
 
-    if st.session_state.day_completed and not st.session_state.execution_data.empty:
-        total_planned_visits = len(st.session_state.plan)
-        total_actual_visits = len(st.session_state.execution_data[st.session_state.execution_data["Actual Status"] != "Not Visited"])
-        actual_rx_obtained = sum(get_rx_count(outcome) for outcome in st.session_state.execution_data["Outcome"].values)
-        target_rx = sum(get_rx_count(obj) for obj in st.session_state.plan["Objective"].values)
-
-        st.subheader("Performance Summary")
-        col_perf1, col_perf2, col_perf3 = st.columns(3)
-        with col_perf1:
-            st.metric("Visits (Planned vs. Actual)", f"{total_actual_visits}/{total_planned_visits}",
-                      delta=total_actual_visits - total_planned_visits, delta_color="inverse")
-        with col_perf2:
-            st.metric("Rx (Target vs. Actual)", f"{actual_rx_obtained}/{target_rx}",
-                      delta=actual_rx_obtained - target_rx, delta_color="normal")
-        with col_perf3:
-            # Overall status indicator
-            if actual_rx_obtained >= target_rx * 0.9 and total_actual_visits >= total_planned_visits * 0.8:
-                st.markdown(f"**Overall Status:** <span class='status-success'>**On Track (Green)**</span>", unsafe_allow_html=True)
-            elif actual_rx_obtained >= target_rx * 0.7 or total_actual_visits >= total_planned_visits * 0.6:
-                st.markdown(f"**Overall Status:** <span class='status-warning'>**Minor Deviations (Yellow)**</span>", unsafe_allow_html=True)
-            else:
-                st.markdown(f"**Overall Status:** <span class='status-danger'>**Significant Issues (Red)**</span>", unsafe_allow_html=True)
-
-        st.subheader("Visit-wise Variance")
-        variance_data = []
-        for planned_time, planned_row in st.session_state.plan.iterrows():
-            doctor = planned_row["Doctor"]
-            planned_obj = planned_row["Objective"]
-            
-            # Find corresponding actual data
-            actual_row_match = st.session_state.execution_data[
-                (st.session_state.execution_data["Time Slot"] == planned_time) &
-                (st.session_state.execution_data["Doctor"] == doctor)
-            ]
-            
-            actual_status = "N/A"
-            actual_outcome = "N/A"
-            notes = ""
-            
-            if not actual_row_match.empty:
-                actual_row = actual_row_match.iloc[0]
-                actual_status = actual_row["Actual Status"]
-                actual_outcome = actual_row["Outcome"]
-                notes = actual_row["Notes"]
-
-            variance_data.append({
-                "Time Slot": planned_time,
-                "Doctor": doctor,
-                "Planned Objective": planned_obj,
-                "Planned Status": planned_row["Planned Status"],
-                "Actual Status": actual_status,
-                "Actual Outcome": actual_outcome,
-                "Notes": notes
-            })
-
-        variance_df = pd.DataFrame(variance_data)
-
-        # Apply color based on actual status
-        def color_variance_status(val):
+    if not st.session_state.execution_data.empty:
+        st.subheader("Simulated Daily Execution:")
+        # Apply styling for status column
+        def color_status_text(val):
             if val == "Success": return "color: #28a745; font-weight: bold;"
             elif val == "Partial": return "color: #ffc107; font-weight: bold;"
-            elif val == "Failed" or val == "Not Visited": return "color: #dc3545; font-weight: bold;"
-            else: return ""
+            elif val == "Failed": return "color: #dc3545; font-weight: bold;"
+            else: return "" # Default for "Not Visited" or other statuses
 
         st.dataframe(
-            variance_df.style.applymap(color_variance_status, subset=["Actual Status"]),
-            use_container_width=True,
-            height=300
+            st.session_state.execution_data.style.applymap(color_status_text, subset=['Actual Status']),
+            use_container_width=True, 
+            hide_index=True
         )
-
-        st.subheader("Key Findings & Learnings")
-        for insight in st.session_state.insights:
-            if insight["type"] == "error":
-                st.error(insight["text"])
-            elif insight["type"] == "warning":
-                st.warning(insight["text"])
-            elif insight["type"] == "success":
-                st.success(insight["text"])
-            else:
-                st.info(insight["text"])
-
+    elif st.session_state.day_completed:
+        st.info("Simulation completed, but no execution data was generated. This can happen if your plan was empty before running the simulation.")
     else:
-        st.warning("Complete a day's execution to generate the EOD assessment and insights.")
+        st.info("Run today's simulation from the sidebar to see the execution data.")
 
-# SECTION 4: RE-PLAN FOR NEXT DAY
-st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
-with st.container():
-    st.header("🔄 Re-Plan for Tomorrow")
-
+with tab3:
+    st.header(f"Analytics & Insights for {st.session_state.current_date}")
+    st.write("Get a data-driven overview of your daily performance and key takeaways.")
     if st.session_state.day_completed:
-        st.info("Edit the table below to finalize tomorrow's plan. New rows can be added.")
-        edited_replan_df = st.data_editor(
-            st.session_state.replan_data,
+        st.markdown(st.session_state.insights_text, unsafe_allow_html=True)
+    else:
+        st.info("Run today's simulation from the sidebar to generate analytics and insights.")
+
+with tab4:
+    st.header(f"AI Replan for Tomorrow ({datetime.strptime(st.session_state.current_date, '%Y-%m-%d').date() + timedelta(days=1)})")
+    st.write("Receive intelligent suggestions for optimizing your next day's plan based on today's performance.")
+    if st.session_state.day_completed:
+        st.markdown(st.session_state.replan_text, unsafe_allow_html=True)
+    else:
+        st.info("Run today's simulation from the sidebar to get AI-driven replan suggestions.")
+
+# --- NEW TAB: Next Day's Plan ---
+with tab5:
+    next_day_date = datetime.strptime(st.session_state.current_date, '%Y-%m-%d').date() + timedelta(days=1)
+    st.header(f"AI-Generated Plan for {next_day_date.strftime('%Y-%m-%d')}")
+    st.write("Review, edit, and approve the AI-generated plan for tomorrow.")
+
+    if st.session_state.day_completed and not st.session_state.next_day_plan.empty:
+        st.info("You can edit the cells in the table below directly.")
+        edited_df = st.data_editor(
+            st.session_state.next_day_plan,
+            num_rows="dynamic", # Allows adding/deleting rows
             column_config={
-                "Time Slot": st.column_config.TextColumn("Time Slot (e.g., 9:00 AM)"),
-                "Task": st.column_config.TextColumn("Task (Doctor/Chemist Name)", required=True),
+                "Time Slot": st.column_config.TextColumn("Time Slot (e.g., 10:00 AM)"),
+                "Doctor": st.column_config.TextColumn("Doctor/Pharmacy Name"),
+                "Objective": st.column_config.TextColumn("Objective"),
+                "Brand": st.column_config.TextColumn("Brand"),
                 "Priority": st.column_config.SelectboxColumn(
                     "Priority",
-                    options=["Critical", "High", "Medium", "Low"],
-                    required=True
+                    options=["High (Failed Today)", "High (Partial Today)", "Medium (Successful Today)", "Low (New Potential)"],
+                    required=True,
                 ),
-                "Reason": st.column_config.TextColumn("Objective/Reason"),
-                "Brand": st.column_config.TextColumn("Associated Brand")
             },
-            num_rows="dynamic", # Allows adding/deleting rows
             use_container_width=True,
-            key="replan_editor"
+            hide_index=True
         )
+        st.session_state.next_day_plan = edited_df # Update session state with edited DataFrame
 
-        if st.button("✅ Approve & Finalize Tomorrow's Plan", type="primary", use_container_width=True):
-            # Convert edited_replan_df back to the plan DataFrame structure
-            new_plan_dict = {}
-            for index, row in edited_replan_df.iterrows():
-                # Ensure valid time slot for indexing
-                time_slot_val = row["Time Slot"]
-                if pd.isna(time_slot_val) or time_slot_val.strip() == "":
-                    st.error(f"Error: Time Slot cannot be empty for row {index + 1}. Please provide a time.")
-                    st.stop() # Stop execution if validation fails
+        col_approve, col_clear = st.columns([0.2, 0.8])
+        with col_approve:
+            if st.button("✅ Approve Plan", type="primary"):
+                # Here you would typically save this plan to a database or a persistent file
+                st.success("Plan approved! This plan can now be used for the next day's simulation.")
+                # You might want to automatically set this as the 'plan' for the next day
+                # when 'Start New Day' is clicked. This requires modifying initialize_session_state_for_date
+                # to check for an approved next_day_plan.
+        with col_clear:
+            if st.button("🗑️ Clear Next Day's Plan", type="secondary"):
+                st.session_state.next_day_plan = pd.DataFrame(columns=["Time Slot", "Doctor", "Objective", "Brand", "Priority"])
+                st.toast("Next day's plan cleared!", icon="🧹")
+                st.rerun() # Refresh to show empty table
 
-                new_plan_dict[time_slot_val] = {
-                    "Doctor": row["Task"],
-                    "Objective": row["Reason"],
-                    "Brand": row["Brand"], # Use brand from replan
-                    "Planned Status": "Planned"
-                }
-
-            st.session_state.plan = pd.DataFrame.from_dict(new_plan_dict, orient="index")
-
-            # Reset other session states for the new day
-            st.session_state.day_completed = False
-            st.session_state.execution_data = pd.DataFrame(columns=[
-                "Time Slot", "Doctor", "Planned Objective", "Actual Time", "Outcome", "Notes", "Duration", "Actual Status"
-            ]) # Clear execution
-            st.session_state.insights = []
-            st.session_state.replan_data = pd.DataFrame(columns=[
-                "Time Slot", "Task", "Priority", "Reason", "Brand"
-            ]) # Clear replan
-            st.session_state.current_date = (datetime.strptime(st.session_state.current_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-
-            st.success("Plan approved! The dashboard is now ready for tomorrow's operations.")
-            st.rerun()
+    elif st.session_state.day_completed:
+        st.info("No AI-generated plan available for tomorrow. This might happen if today's simulation had no visits.")
     else:
-        st.info("Complete today's execution (or simulate it) to generate and edit tomorrow's plan.")
-
-# FOOTER
-st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
-st.caption(f"© {datetime.now().year} FieldForce Intelligence - Planner | v 0.2 | {rep_name} | {territory}")
+        st.info("Run today's simulation from the sidebar to generate a plan for tomorrow.")
